@@ -1,0 +1,17 @@
+// Contoh pipeline — sesuaikan path/host dengan lingkungan kelompok.
+pipeline {
+  agent any
+  stages {
+    stage('Install')   { steps { sh 'composer install --no-interaction --prefer-dist' } }
+    stage('Test')      { steps { sh 'php artisan test' } }
+    stage('Deploy')    { steps { sh 'php artisan migrate --force && php artisan config:cache && php artisan route:cache' } }
+    stage('Smoke Test') {
+      steps {
+        // gagal (exit != 0) bila HTTP bukan 2xx ATAU database tidak "up"
+        sh '''
+          curl -fsS http://localhost:8000/health | tee /dev/stderr | grep -q '"database":"up"'
+        '''
+      }
+    }
+  }
+}
