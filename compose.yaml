@@ -1,0 +1,98 @@
+name: antrisehat
+
+# Environment bersama untuk app dan scheduler (hanya yang dibutuhkan Laravel)
+x-laravel-env: &laravel-env
+  APP_NAME: AntriSehat
+  APP_ENV: ${APP_ENV:-production}
+  APP_KEY: ${APP_KEY:?APP_KEY belum diisi di .env}
+  APP_DEBUG: ${APP_DEBUG:-false}
+  APP_URL: ${APP_URL:-http://localhost:8000}
+  LOG_CHANNEL: stderr
+  DB_CONNECTION: mysql
+  DB_HOST: db
+  DB_PORT: "3306"
+  DB_DATABASE: ${DB_DATABASE:?DB_DATABASE belum diisi di .env}
+  DB_USERNAME: ${DB_USERNAME:?DB_USERNAME belum diisi di .env}
+  DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD belum diisi di .env}
+  SESSION_DRIVER: file
+  CACHE_STORE: file
+  TZ: Asia/Jakarta
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD belum diisi di .env}
+      TZ: Asia/Jakarta
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  app:
+    # Image hasil pipeline dari Docker Hub, bukan build lokal
+    image: ${DOCKERHUB_USER:?DOCKERHUB_USER belum diisi di .env}/antrisehat:latest
+    restart: unless-stopped
+    environment:
+      <<: *laravel-env
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      RUN_SEEDER: ${RUN_SEEDER:-false}
+    ports:
+      - "${APP_PORT:-8000}:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - frontend   # agar port bisa diakses dari host
+      - backend    # untuk bicara ke database
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  scheduler:
+    # Image sama dengan app, perintah berbeda: menjalankan Laravel scheduler
+    image: ${DOCKERHUB_USER}/antrisehat:latest
+    restart: unless-stopped
+    user: www-data
+    command: ["php", "artisan", "schedule:work"]
+    environment:
+      <<: *laravel-env
+      RUN_MIGRATIONS: "false"
+      RUN_SEEDER: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f '[a]rtisan schedule:work' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true   # tidak bisa diakses dari luar / tidak ada akses internet
+
+volumes:
+  db_data:
